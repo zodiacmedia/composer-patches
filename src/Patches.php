@@ -8,16 +8,20 @@
 namespace cweagans\Composer;
 
 use Composer\Composer;
+use Composer\DependencyResolver\DefaultPolicy;
 use Composer\DependencyResolver\Operation\InstallOperation;
 use Composer\DependencyResolver\Operation\UninstallOperation;
 use Composer\DependencyResolver\Operation\UpdateOperation;
 use Composer\DependencyResolver\Operation\OperationInterface;
+use Composer\DependencyResolver\Pool;
+use Composer\DependencyResolver\Request;
 use Composer\EventDispatcher\EventSubscriberInterface;
 use Composer\IO\IOInterface;
 use Composer\Package\AliasPackage;
 use Composer\Package\PackageInterface;
 use Composer\Plugin\PluginInterface;
 use Composer\Installer\PackageEvents;
+use Composer\Repository\CompositeRepository;
 use Composer\Script\Event;
 use Composer\Script\ScriptEvents;
 use Composer\Installer\PackageEvent;
@@ -133,9 +137,25 @@ class Patches implements PluginInterface, EventSubscriberInterface {
           if (($has_patches && !$has_applied_patches)
             || (!$has_patches && $has_applied_patches)
             || ($has_patches && $has_applied_patches && $tmp_patches[$package_name] !== $extra['patches_applied'])) {
-            $uninstallOperation = new UninstallOperation($package, 'Removing package so it can be re-installed and re-patched.');
+            $operation = new UninstallOperation($package, 'Removing package so it can be re-installed and re-patched.');
             $this->io->write('<info>Removing package ' . $package_name . ' so that it can be re-installed and re-patched.</info>');
-            $installationManager->uninstall($localRepository, $uninstallOperation);
+
+            /**
+             * TODO: Replicate \Composer\Installer::doInstall's dispatchPackageEvent parameters.
+             * It's not a priority as the policy, pool and request parameters aren't that important - and requires reading parameters and composer configs.
+             * @see \Composer\Installer::doInstall
+             */
+            $devMode = $event->isDevMode();
+            $policy = new DefaultPolicy();
+            $pool = new Pool('dev');
+            $installedRepo = new CompositeRepository(array($package->getRepository()));
+            $request = new Request();
+            $operations = array($operation);
+
+            // Dispatch the relevant events on uninstalling.
+            $this->eventDispatcher->dispatchPackageEvent(PackageEvents::PRE_PACKAGE_UNINSTALL, $devMode, $policy, $pool, $installedRepo, $request, $operations, $operation);
+            $installationManager->uninstall($localRepository, $operation);
+            $this->eventDispatcher->dispatchPackageEvent(PackageEvents::POST_PACKAGE_UNINSTALL, $devMode, $policy, $pool, $installedRepo, $request, $operations, $operation);
           }
         }
       }
